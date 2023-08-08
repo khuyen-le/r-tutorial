@@ -30,7 +30,7 @@ library('car')
 
 # Load data
 
-There are different function you can use for different data types. .csv is the most common file type to store your data, but we're using .RData for this tutorial.
+There are different functions you can use for different data types. .csv is the most common file type to store your data, but we're using .RData for this tutorial.
 
 ```{r load data, include=FALSE}
 load("dragons_wide.RData")
@@ -77,11 +77,14 @@ Example of base R:
 
 ```{r}
 dragons_baseR <- dragons
+
+#`$` selects a column / makes the new column
 dragons_baseR$new_score <- dragons$score + 50
+
 head(dragons_baseR)
 ```
 
-Example of dplyr:
+Examples of `dplyr`:
 
 **Useful functions:**
 
@@ -91,7 +94,7 @@ Example of dplyr:
 
 `select()`
 
-`summarise()`
+`summarise()` + `group_by()`
 
 **Logic:**
 
@@ -99,21 +102,47 @@ Example of dplyr:
 
 `|` for `or`
 
+**Pipe:**
+
+`%>%`
+
+How you link functions / actions together. `output <- input %>% action %>% action %>% ...`
+
 ```{r}
 dplyr <- dragons %>% 
-  filter(site == 'a' & mountainRange == 'Julian') %>%
-  mutate(mountainRange = ifelse(as.character(mountainRange) == 'Julian', 'Julien', mountainRange))
+  filter(site == 'a' & mountainRange == 'Julian') %>% # this line filters out dragons from the Julian mountain range that are in site a
+  mutate(mountainRange = ifelse(as.character(mountainRange) == 'Julian', 'Julien', mountainRange)) # this line changes all the mountain range recorded as 'Julian' to 'Julien'
+
+# toasted bread <- bread %>% cut %>% toast
+
 head(dplyr)
 ```
 
 Calculate the mean of the 2 scores for each dragon.
 
+Without grouping, the mean score is calculated across all observations --> not what we want.
+```{r}
+dragons_mean <- dragons %>%
+  mutate(mean = mean(score))
+head(dragons_mean)
+```
+
+With grouping, we get the mean of the 2 tests for each dragon
 ```{r}
 dragons <- dragons %>% 
   group_by(pid) %>%
   mutate(mean = mean(score))
 
 head(dragons)
+```
+
+Grouping with summary: get the mean scores for each test, by each mountain range
+```{r}
+dragons_mean_mountainRange <- dragons %>%
+  group_by(test, mountainRange) %>%
+  summarise(mean = mean(score))
+
+dragons_mean_mountainRange
 ```
 
 Standardize (z-score) scores: Note the combination of base R and dplyr.
@@ -145,8 +174,8 @@ Violin + jitter plot:
 ggplot(data = dragons,
        mapping = aes(x = mountainRange, y = score)) + 
   geom_violin(aes(fill = mountainRange)) +
-  geom_jitter(height = 0, 
-              alpha = 0.5, 
+  geom_jitter(height = 0, # jitter horizontally, not vertically 
+              alpha = 0.5, # transparency
               aes(color = test)) + 
   theme_classic() + 
   guides(fill = "none")
@@ -243,7 +272,7 @@ Yes -- after adding the random effect of mountain range, there is still an effec
 
 **Note: Singular fit**
 
-Not a big deal for this demonstration, but if you see this in your actual analysis, it's a sign that you're predictor structure is too complex and is overfitting the data. Consider dropping random effects.
+Not a big deal for this demonstration, but if you see this in your actual analysis, it's a sign that your predictor structure is too complex and is overfitting the data. Consider dropping random effects.
 
 **Note: Common random effects:**
 
