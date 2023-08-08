@@ -1,0 +1,3 @@
+"0","dplyr <- dragons %>% "
+"0","  filter(site == 'a' & mountainRange == 'Julian') %>%"
+"0","  mutate(mountainRange = ifelse(as.character(mountainRange) == 'Julian', 'Julien', mountainRange))"

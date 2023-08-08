@@ -1,0 +1,327 @@
+---
+title: "R Tutorial"
+output: html_document
+date: "2023-08-07"
+---
+### Acknowledgements 
+This tutorial is based on the tutorial by [Gabriela K Hajduk](https://gkhajduk.github.io/2017-03-09-mixed-models/)
+
+The code and data can be downloaded here.
+
+# Set up
+Load libraries that we might use. 
+```{r setup, message = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#install.packages(c('tidyverse', 'purrr', 'ggplot2', 'lme4', 'car'))
+library('tidyverse')
+library("purrr")
+library('ggplot2')
+library('lme4')
+library('car')
+```
+
+# Load data
+There are different function you can use for different data types. .csv is the most common file type to store your data, but we're using .RData for this tutorial. 
+
+```{r load data, include=FALSE}
+load("dragons_wide.RData")
+load("dragons_long.RData")
+```
+
+# Recording data and making your life easier
+
+```{r, include=FALSE}
+head(dragons_long)
+
+head(dragons_wide)
+```
+
+Long format shows multiple measurements for the same subject on different lines. 
+
+Wide format shows multiple measurements for the same subject on the same line. 
+
+It's relatively easy to switch between the 2 formats. But in my experience, long format is more useful, for e.g., mixed-effects models (the standard analysis tool) requires long format. Therefore, I record my data in the long format. 
+
+## Converting long to wide and vice versa
+```{r, warning=FALSE}
+dragons_long_to_wide <- dragons_long %>%
+  pivot_wider(
+    names_from = test, values_from = score
+  )
+head(dragons_long_to_wide)
+
+dragons_wide_to_long <- dragons_wide %>%
+  pivot_longer(c(test_1, test_2), names_to = "test", values_to = "score")
+head(dragons_wide_to_long)
+```
+
+# Data Manipulation 
+Useful to save an original version before you manipulate data, especially if you haven't set up and test your analysis pipeline beforehand. 
+
+```{r}
+dragons <- dragons_long
+```
+
+Example of base R: 
+```{r}
+dragons_baseR <- dragons
+dragons_baseR$new_score <- dragons$score + 50
+head(dragons_baseR)
+```
+
+Example of dplyr:
+
+**Useful functions:**
+
+`filter()`
+
+`mutate()`
+
+`select()`
+
+`summarise()`
+
+**Logic:**
+
+`&` for `and`
+
+`|` for `or`
+
+```{r}
+dplyr <- dragons %>% 
+  filter(site == 'a' & mountainRange == 'Julian') %>%
+  mutate(mountainRange = ifelse(as.character(mountainRange) == 'Julian', 'Julien', mountainRange))
+head(dplyr)
+```
+
+Calculate the mean of the 2 scores for each dragon.
+```{r}
+dragons <- dragons %>% 
+  group_by(pid) %>%
+  mutate(mean = mean(score))
+
+head(dragons)
+```
+
+Standardize (z-score) scores: 
+Note the combination of base R and dplyr. 
+```{r}
+dragons <- dragons %>%
+  mutate(score_z = (score - mean(dragons$score)) / sd(dragons$score))
+
+head(dragons)
+```
+
+# Visualization
+
+Bar plot:
+```{r}
+ggplot(data = dragons,
+       mapping = aes(x = mountainRange, y = score)) + 
+  stat_summary(fun.data = "mean_cl_boot", 
+               geom = "bar") + 
+  stat_summary(fun.data = "mean_cl_boot", 
+               geom = "pointrange") + 
+  theme_classic()
+```
+
+Violin + jitter plot:
+```{r}
+ggplot(data = dragons,
+       mapping = aes(x = mountainRange, y = score)) + 
+  geom_violin(aes(fill = mountainRange)) +
+  geom_jitter(height = 0, 
+              alpha = 0.5, 
+              aes(color = test)) + 
+  theme_classic() + 
+  guides(fill = "none")
+
+ggplot(data = dragons %>% filter(test == "test_1"),
+       mapping = aes(x = mountainRange, y = score)) + 
+  geom_violin(aes(fill = mountainRange)) +
+  geom_jitter(height = 0, 
+              alpha = 0.5) + 
+  theme_classic() + 
+  theme(legend.position = "none")
+```
+Scatter plot + best fit line:
+```{r}
+ggplot(data = dragons, 
+       mapping = aes(x = bodyLength, y = score)) + 
+  geom_smooth(method = 'lm') + 
+  geom_point(aes(color = mountainRange), 
+             size = 2) +
+  theme_classic()
+```
+
+Facets into grouping variables:
+```{r}
+ggplot(data = dragons, 
+       mapping = aes(x = bodyLength, y = score, colour = mountainRange)) + 
+  geom_point(size = 2, alpha = .3) +
+  geom_smooth(method='lm') +
+  facet_grid(~mountainRange) +
+  theme_classic() + 
+  theme(legend.position = "none")
+
+ggplot(data = dragons, 
+       mapping = aes(x = bodyLength, y = score, colour = test)) + 
+  geom_point(size = 2, alpha = .3) +
+  geom_smooth(method='lm') +
+  facet_grid(~test) +
+  theme_classic() + 
+  theme(legend.position = "none")
+
+#Another example of facet_grid
+ggplot(data = dragons, 
+       mapping = aes(x = bodyLength, y = score, colour = mountainRange)) + 
+  geom_point(size = 2, alpha = .3) +
+  geom_smooth(method='lm') +
+  facet_grid(test~mountainRange) +
+  theme_classic() + 
+  theme(legend.position = "none")
+```
+
+# Data Analysis
+**Terms:**
+
+Fixed effect: main predictor (e.g., body length, test)
+
+Random effect: source of systematic noise (e.g., mountain range, individual dragon)
+
+Levels: different values of a predictor (e.g., trial 1 vs 2)
+
+Interaction: combinations of 2 predictors making different predictions for the dependent variable
+
+**Hypothesis 1: higher body length --> higher test score**
+
+## Not controlling for random effects
+```{r}
+lm.bl <- lm(score ~ bodyLength, data = dragons)
+summary(lm.bl)
+```
+
+There is an effect of body length. 
+
+But when we facet out mountainRange and test, we saw that the effect is different between tests 1 and 2. We also saw that for some mountain ranges, this isn't the case. 
+
+## Considering random effects
+
+Relationship between body length and score might differ based on which mountain range a dragon comes from. And the overall effect we found of body length on score might be driven by some mountain ranges where the effect is very strong. 
+
+Relationship between body length and score might also differ based on the individual dragon (i.e., some dragons are better at all tests.)
+
+**Syntax:** `(1|random effect)`
+```{r rerun base}
+lmer.base <- lmer(score ~ bodyLength + (1|mountainRange) + (1|pid), data = dragons)
+summary(lmer.base)
+Anova(lmer.base, type = 3)
+```
+
+Yes -- after adding the random effect of mountain range, there is still an effect of body length on score. 
+
+**Note: Singular fit**
+
+Not a big deal for this demonstration, but if you see this in your actual analysis, it's a sign that you're predictor structure is too complex and is overfitting the data. Consider dropping random effects. 
+
+**Note: Common random effects:**
+
+Individual participant: if a participant sees multiple trials, there will be dependencies between their responses -- they might intrinsically be better or worse at the task. 
+
+Individual trial: a trial might intrinsically be easier or more difficult for all participants. 
+
+I always include both of these random effects in my analysis. In this demonstration, we will be including random participant effect, but we don't have multiple trials so we won't be including that. 
+
+## Adding a second predictor
+
+Let's say we have a second hypothesis: 
+
+**Hypothesis 2: higher body length --> higher test score, scores for test 2 > test 1**
+
+Checking the effect of test: 
+```{r}
+lmer.test <- lmer(score ~ test + (1|mountainRange) + (1|pid), data = dragons)
+summary(lmer.test)
+Anova(lmer.test)
+```
+
+Add both fixed effects: 
+```{r}
+lmer.bl_test <- lmer(score ~ bodyLength + test + (1|mountainRange) + (1|pid), data = dragons)
+summary(lmer.bl_test)
+Anova(lmer.bl_test, type = 3)
+anova(lmer.bl_test, lmer.base, type = 3, refit = FALSE)
+```
+
+There is an effect of body length and test (after controlling for random effects). And adding test as a fixed effect results in a model that better explains the variance in the data. 
+
+**Note: ANOVA:**
+
+`Anova()` or `car::Anova()`: compare the full model with a reduced model where a predictor is removed --> this allows us to get the p-value to see whether a predictor (e.g., body length) is significant. 
+
+`anova()`: compare 2 models --> whether 1 model explains significantly more variance in the data compared to the other.
+
+See also: https://www.bookdown.org/rwnahhas/RMPH/mlr-distinctions.html 
+
+## Adding an interaction effect
+So now we know that both body length and test is a significant predictor of the data. Do they predict the data in the same way? 
+
+**Syntax:** `fixed_eff1 * fixed_eff2`
+```{r}
+lmer.bl_test_int <- lmer(score ~ bodyLength * test + (1|mountainRange) + (1|pid), data = dragons)
+summary(lmer.bl_test_int)
+Anova(lmer.bl_test_int, type = 3)
+anova(lmer.bl_test_int, lmer.bl_test, type = 3, refit = FALSE)
+```
+
+Yes!
+
+## Different structures of random effects
+
+### Random slopes
+Think of random effects as 'grouping' variables that determine dependencies of data. 
+They can affect either the intercept or the slope of the best-fit line. 
+
+Consider the scenario where we are predicting score based on body length, with mountain range as the grouping variable. 
+
+Intercept: the projected score when body length = 0, for each mountain range. You can also think of this as the 'baseline' performance, even though this is not very accurate. 
+
+Slope: the change in score with a fixed change in body length, for each mountain range. 
+
+If we fit a best-fit line by each mountain range, the intercept and/or slope of each line might be different. 
+We might want to account for this in our random effect structure. 
+
+**Syntax:** 
+
+Intercept random effect: `(1|rand_eff)`
+
+Slope random effect -- need to include an intercept random effect: `(1 + slope_rand_eff | intercept_rand_eff)`. This is usually the same as the fixed effect (essentially, we are allowing the fixed effect's slope to vary based on the grouping variable.)
+
+```{r}
+lmer.bl_test_int_slope <- lmer(score ~ bodyLength * test + (1 + (bodyLength * test)|mountainRange) + (1|pid), data = dragons)
+summary(lmer.bl_test_int_slope)
+Anova(lmer.bl_test_int_slope, type = 3)
+anova(lmer.bl_test_int_slope, lmer.bl_test_int, type = 3, refit = FALSE)
+```
+
+Yes, there is still an effect of body length, test and interaction effect when allowing for a random slope. But it does not explain a significantly larger variance in the data. 
+
+### Nesting random effects
+There are 3 sites within each mountain range. Maybe the dragons in each have a different intercept (remember, intercept = roughly baseline performance).
+
+Wrong syntax: `(1|mountainRange) + (1|site)` --> crossed structure, assume that all sites 'A' across mountain ranges have the same intercept. This model thinks that there are only 3 random site intercepts (in fact, there are 3 sites * 8 mountain ranges = 24 site intercepts).
+
+Correct syntax: `(1|mountainRange/site)` or `(1|mountainRange) + (1|mountainRange:site)`
+
+**Note:**
+
+Make your life easier by just naming the sites differently from the beginning (e.g. mountainRange_A)
+
+```{r}
+lmer.bl_test_int_site <- lmer(score ~ bodyLength * test + (1|mountainRange/site) + (1|pid), data = dragons)
+summary(lmer.bl_test_int_site)
+Anova(lmer.bl_test_int_site, type = 3)
+anova(lmer.bl_test_int_site, lmer.bl_test_int, type = 3, refit = FALSE)
+```
+
+Significant, but not an improvement over the interaction model! 
