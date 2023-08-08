@@ -1,5 +1,0 @@
-"0","load(""dragons_long.RData"")
-"
-"2","Error in exists(cacheKey, where = .rs.WorkingDataEnv, inherits = FALSE) : 
-  invalid first argument
-"
