@@ -1,0 +1,339 @@
+---
+title: "Linear Mixed-Effects Model"
+output:
+  pdf_document: default
+  html_document: default
+date: "2024-02-19"
+---
+
+**Acknowledgements:** This tutorial is based on the tutorial by [Gabriela K Hajduk](https://gkhajduk.github.io/2017-03-09-mixed-models/)
+
+```{r setup, message = FALSE, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#install.packages(c('tidyverse', 'purrr', 'ggplot2', 'lmerTest', 'car', 'emmeans'))
+#library("devtools") # if not available: install.packages("devtools")
+#install_github("m-Py/prmisc")
+
+library('tidyverse')
+library("purrr")
+library('ggplot2')
+library('lmerTest') #note: loading only lme4 will not give you p-vals
+library('car')
+library('prmisc')
+library('emmeans')
+library('report')
+```
+
+```{r load data, include=FALSE}
+dragons_full <- read_csv("dragons_long.csv")
+dragons <- dragons_full %>%
+  filter(test != "test_4")
+
+dragons_test4 <- dragons_full %>%
+  filter(test == "test_4")
+```
+
+**Terms:**
+
+Fixed effect: main predictor (e.g., body length, test)
+
+Random effect: source of systematic noise (e.g., mountain range, individual dragon) that is not important for our hypothesis
+
+Levels: different values of a predictor (e.g., trial 1 vs 2)
+
+Interaction: combinations of 2 predictors making different predictions for the dependent variable
+
+## Linear regression, without random effects
+
+**Hypothesis 1: higher body length --\> higher test score**
+
+```{r}
+lm.bl <- lm(score ~ bodyLength, data = dragons)
+summary(lm.bl)
+```
+
+### Data interpretation and reporting:
+
+How do we interpret the data?
+
+```{r}
+ggplot(data = dragons, 
+       mapping = aes(x = bodyLength, y = score)) + 
+  geom_smooth(method='lm')
+
+ggplot(data = dragons, 
+       mapping = aes(x = bodyLength, y = score)) + 
+  geom_smooth(method='lm') +
+  geom_abline(intercept = 20.92057, slope = 0.34729, 
+              color = "red")
+```
+
+**Reporting results:**
+
+Body length is a significant predictor of test scores, with dragons that have longer bodies scoring higher ($\beta$ = `r force_decimals(coef(summary(lm.bl))['bodyLength', "Estimate"])`, 95% $CI$ [`r force_decimals(confint(lm.bl,method="Wald")['bodyLength', '2.5 %'])`, `r force_decimals(confint(lm.bl,method="Wald")['bodyLength', '97.5 %'])`], `r format_p(coef(summary(lm.bl))['bodyLength', "Pr(>|t|)"])`).
+
+**Some useful functions:**
+
+`coef(lm.bl)`: get only beta estimates
+
+`coef(summary(lm.bl))`: get beta estimates, p-value, etc.
+
+`report(lm.bl)`: get a (lengthy) APA report.
+
+`confint`: get CI (default is 95%). Or you can report SE. Use `confint.merMod` for lmer/glmer.
+
+`force_decimals` and `force_p`: additional aesthetics stuff, automatically format values to APA.
+
+### Now onto other models...
+
+When we facet out mountainRange and test, we saw that the effect is different between tests 1 and 2. We also saw that the effect is different between mountain ranges.
+
+```{r}
+ggplot(data = dragons, 
+       mapping = aes(x = bodyLength, y = score, colour = mountainRange)) + 
+  geom_point(size = 2, alpha = .3) +
+  geom_smooth(method='lm') +
+  facet_grid(test~mountainRange) +
+  theme_classic() + 
+  theme(legend.position = "none")
+```
+
+## Considering random effects
+
+Relationship between body length and score might differ based on which mountain range a dragon comes from. And the overall effect we found of body length on score might be driven by some mountain ranges where the effect is very strong.
+
+Relationship between body length and score might also differ based on the individual dragon (i.e., some dragons are better at all tests.)
+
+**Syntax:** `(1|random effect)`
+
+```{r rerun base}
+lmer.base <- lmer(score ~ bodyLength + (1|mountainRange) + (1|pid), data = dragons)
+summary(lmer.base)
+Anova(lmer.base, type = 3)
+
+coef(summary(lmer.base))
+```
+
+
+Yes -- after adding the random effect of mountain range, there is still an effect of body length on score.
+
+**Note: Singular fit**
+
+Not a big deal for this demonstration, but if you see this in your actual analysis, it's a sign that your predictor structure is too complex and is overfitting the data. Consider dropping random effects.
+
+**Note: Common random effects:**
+
+Individual participant: if a participant sees multiple trials, there will be dependencies between their responses -- they might intrinsically be better or worse at the task.
+
+Individual trial: a trial might intrinsically be easier or more difficult for all participants.
+
+I always include both of these random effects in my analysis. In this demonstration, we will be including random participant effect, but we don't have multiple trials so we won't be including that.
+
+**What is `Anova` doing?** 
+
+It's running a Wald chi-squared test -- p-values will be similar to a likelihood ratio test comparing against a uniformly informative model (no fixed effects, no random effects!) But these are different tests.
+
+```{r}
+lm.uni <- lm(score ~ 1 , data = dragons)
+#summary(lm.uni)
+#Anova(lm.uni, type = 3)
+anova(lmer.base, lm.uni, type = 3, refit = FALSE)
+```
+
+## Adding a second predictor
+
+Let's say we have a second hypothesis:
+
+**Hypothesis 2: higher body length --\> higher test score, scores for test 2 \> test 1**
+
+Checking the effect of test:
+
+```{r}
+lmer.test <- lmer(score ~ test + (1|mountainRange) + (1|pid), data = dragons )
+summary(lmer.test)
+Anova(lmer.test, type = 3)
+```
+
+Add both fixed effects:
+
+```{r}
+lmer.bl_test <- lmer(score ~ bodyLength + test + (1|mountainRange) + (1|pid), 
+                     data = dragons)
+summary(lmer.bl_test)
+lmer.anova.bl_test <- Anova(lmer.bl_test, type = 3)
+lmer.anova.bl_test 
+lmer.compare.bl_test <- anova(lmer.bl_test, lmer.base, type = 3, refit = FALSE)
+lmer.compare.bl_test
+```
+
+There is an effect of body length and test (after controlling for random effects). And adding test as a fixed effect results in a model that better explains the variance in the data.
+
+### Post-hoc comparisons
+
+How do we interpret the 'test' effect? Use `emmeans`.
+
+```{r}
+lmer.contr.bl_test <- lmer.bl_test %>% 
+  emmeans(specs = pairwise ~ test,
+          type = "response") %>%
+  pluck("contrasts") %>%
+  summary()
+  
+lmer.contr.bl_test
+```
+
+Scores in test 1 is significantly higher than scores in test 2, and also significantly higher than test 3. But there is no significant differences between test 1 and 3.
+
+**Reporting results:**
+
+A model that includes both body length and test as predictors showed that they both are significant predictors of test scores, with dragons that have longer bodies scoring higher ($\beta$ = `r force_decimals(coef(summary(lmer.bl_test))['bodyLength', "Estimate"])`, 95% $CI$ [`r force_decimals(confint.merMod(lmer.bl_test,method="Wald")['bodyLength', '2.5 %'])`, `r force_decimals(confint.merMod(lmer.bl_test,method="Wald")['bodyLength', '97.5 %'])`], `r format_p(coef(summary(lmer.bl_test))['bodyLength', "Pr(>|t|)"])`). There is an effect of test ($\chi^2$(`r lmer.anova.bl_test["test", "Df"]`) = `r force_decimals(lmer.anova.bl_test["test", "Chisq"])`, `r format_p(lmer.anova.bl_test["test", "Pr(>Chisq)"])`).
+
+Post-hoc pairwise comparisons between the three test types with Tukey corrections showed that scores in Test 1 is significantly higher than Test 2 ($t$ = `r lmer.contr.bl_test %>% filter(contrast == "test_1 - test_2") %>% pull(t.ratio) %>% force_decimals()`, `r lmer.contr.bl_test %>% filter(contrast == "test_1 - test_2") %>% pull(p.value) %>% format_p()`) and Test 3 ($t$ = `r lmer.contr.bl_test %>% filter(contrast == "test_1 - test_3") %>% pull(t.ratio) %>% force_decimals()`, `r lmer.contr.bl_test %>% filter(contrast == "test_1 - test_3") %>% pull(p.value) %>% format_p()`). Scores in Test 2 was not significantly different from Test 3 ($t$ = `r lmer.contr.bl_test %>% filter(contrast == "test_2 - test_3") %>% pull(t.ratio) %>% force_decimals()`, `r lmer.contr.bl_test %>% filter(contrast == "test_2 - test_3") %>% pull(p.value) %>% format_p()`).
+
+A likelihood ratio test shows that the model with both body length and test as predictors explained significantly more variation in the observed data compared to the base model with only body length as predictor ($\chi^2$(`r lmer.compare.bl_test["lmer.bl_test", "Df"]`) = `r force_decimals(lmer.compare.bl_test["lmer.bl_test", "Chisq"])`, `r format_p(lmer.compare.bl_test["lmer.bl_test", "Pr(>Chisq)"])`).
+
+**Note: ANOVA:**
+
+`Anova()` or `car::Anova()`: compare the full model with a uniformly informative model (all predictors removed) --\> this allows us to get the p-value to see whether a predictor (e.g., body length) is significant.
+
+`anova()`: compare 2 models --\> whether 1 model explains significantly more variance in the data compared to the other.
+
+See also: <https://www.bookdown.org/rwnahhas/RMPH/mlr-distinctions.html>
+
+## Adding an interaction effect
+
+So now we know that both body length and test is a significant predictor of the data. Is there an interaction effect -- does body length predict scores in a similar manner across both tests?
+
+**Syntax:** `fixed_eff1 * fixed_eff2` includes both interaction and main effects. `fixed_eff1 : fixed_eff2` to suppress main effects and only test interaction. 
+
+```{r}
+lmer.bl_test_int <- lmer(score ~ bodyLength * test + (1|mountainRange) + (1|pid), 
+                         data = dragons)
+
+summary(lmer.bl_test_int)
+Anova(lmer.bl_test_int, type = 3)
+anova(lmer.bl_test_int, lmer.bl_test, type = 3, refit = FALSE)
+```
+
+There is an interaction effect!
+
+Interpreting estimates of interactions requires some math, which we won't go into. But I recommend [this post](https://vivdas.medium.com/interpreting-the-coefficients-of-a-regression-model-with-an-interaction-term-a-detailed-748a5e031724) if you're interested!
+
+Quick plot (note that this doesn't take into account variances explained by the random effects) that demonstrates this:
+
+Red line: test_1; Blue line: test_2; Green line: test_3
+
+```{r}
+ggplot() + 
+  geom_smooth(data = dragons %>%
+                filter(test == "test_1"), 
+              mapping = aes(x = bodyLength, y = score), 
+              method='lm', 
+              color = "red") +
+  
+  geom_smooth(data = dragons %>%
+                filter(test == "test_2"), 
+              mapping = aes(x = bodyLength, y = score), 
+              method='lm', 
+              color = "blue") +
+  
+  geom_smooth(data = dragons %>%
+                filter(test == "test_3"), 
+              mapping = aes(x = bodyLength, y = score), 
+              method='lm', 
+              color = "green") +
+  theme_classic() 
+```
+
+### Interaction effect vs. 2 predictors
+
+Let's look at a subset of the data with only scores for test 1 and 3.
+
+```{r}
+lmer.bl_test_13 <- lmer(score ~ bodyLength + test + 
+                          (1|mountainRange) + (1|pid), 
+                            data = dragons %>%
+                              filter(test != "test_2"))
+summary(lmer.bl_test_13)
+Anova(lmer.bl_test_13, type = 3)
+
+lmer.bl_test_int_13 <- lmer(score ~ bodyLength * test + 
+                              (1|mountainRange) + (1|pid), 
+                            data = dragons %>%
+                              filter(test != "test_2"))
+summary(lmer.bl_test_int_13)
+Anova(lmer.bl_test_int_13, type = 3)
+```
+
+There is an effect of test, but not when an interaction with body length is added. However, a likelihood ratio test shows that the model without the interaction better explains the data.
+
+```{r}
+anova(lmer.bl_test_int_13, lmer.bl_test_13, type = 3, refit = FALSE)
+```
+
+## Generalized linear mixed-effect models
+
+If DVs are measures where the residual error does not follow a normal distribution --\> use `glmer` instead. This allows you to specify a link function that "link" the response to a linear predictor.
+
+A common use is with a binary outcome (e.g., success / failure, 2AFC, etc.), coded as 0/1. This is essentially a logistic regression. In our example dataset, this is the case with `test_4`.
+
+```{r}
+#removed pid random effect because each dragon is only measured once for test_4
+glmer.test4 <- glmer(score ~ bodyLength + (1|mountainRange), 
+                     data = dragons_test4,
+                     family = "binomial")
+summary(glmer.test4)
+Anova(glmer.test4, type = 3)
+```
+
+## Different structures of random effects
+
+### Random slopes
+
+Think of random effects as 'grouping' variables that determine dependencies of data. They can affect either the intercept or the slope of the best-fit line.
+
+Consider the scenario where we are predicting score based on body length, with mountain range as the grouping variable.
+
+Intercept: the projected score when body length = 0, for each mountain range. You can also think of this as the 'baseline' performance, even though this is not very accurate.
+
+Slope: the change in score with a fixed change in body length, for each mountain range.
+
+If we fit a best-fit line by each mountain range, the intercept and/or slope of each line might be different. We might want to account for this in our random effect structure.
+
+**Syntax:**
+
+Intercept random effect: `(1|rand_eff)`
+
+Slope random effect -- need to include an intercept random effect: `(1 + fixed_eff_whose_slope_vary | rand_eff)`. Essentially, we are allowing the fixed effect's slope to vary based on the grouping variable.
+
+```{r}
+# we let all main effects and the interaction effect vary in both slope and intercept based on mountainRange.
+lmer.bl_test_int_slope <- lmer(score ~ bodyLength * test + 
+                                 (1 + (bodyLength * test)|mountainRange) + (1|pid), data = dragons)
+summary(lmer.bl_test_int_slope)
+Anova(lmer.bl_test_int_slope, type = 3)
+anova(lmer.bl_test_int_slope, lmer.bl_test_int, type = 3, refit = FALSE)
+```
+
+Yes, there is still an effect of body length, test and interaction effect when allowing for a random slope. But it does not explain a significantly larger variance in the data.
+
+### Nesting random effects
+
+There are 3 sites (a, b, c) within each mountain range. Maybe the dragons in each have a different intercept (again, intercept = roughly baseline performance).
+
+Wrong syntax: `(1|mountainRange) + (1|site)` --\> crossed structure, assume that all sites 'A' across mountain ranges have the same intercept. This model thinks that there are only 3 random site intercepts (in fact, there are 3 sites \* 8 mountain ranges = 24 site intercepts).
+
+Correct syntax: `(1|mountainRange/site)` or `(1|mountainRange) + (1|mountainRange:site)`
+
+**Note:**
+
+Make your life easier by just naming the sites differently from the beginning (e.g. mountainRange_A)
+
+```{r}
+lmer.bl_test_int_site <- lmer(score ~ bodyLength * test + (1|mountainRange/site) + (1|pid), data = dragons)
+summary(lmer.bl_test_int_site)
+Anova(lmer.bl_test_int_site, type = 3)
+anova(lmer.bl_test_int_site, lmer.bl_test_int, type = 3, refit = FALSE)
+```
+
+Not an improvement over the interaction model without the nested random effect!

@@ -35,13 +35,13 @@ There are different functions you can use for different data types. .csv is the 
 ```{r load data, include=FALSE}
 load("dragons_wide.RData")
 load("dragons_long.RData")
+dragons_long <- read.csv("dragons_long.csv")
 ```
 
 # Recording data and making your life easier
 
 ```{r, include=FALSE}
 head(dragons_long)
-
 head(dragons_wide)
 ```
 
